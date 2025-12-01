@@ -31,33 +31,37 @@ app.get("/", (req, res) => {
 // ---------------------------
 app.post("/create-order", async (req, res) => {
   const amount = req.body.amount || 10;
-  const orderId = "ORDER_" + Date.now();
+
+  // IMPORTANT: underscore (_) ব্যবহার করা যাবে না
+  const orderId = "ORD" + Date.now();
 
   try {
     const zap = await axios.post(
       "https://api.zapupi.com/api/create-order",
       new URLSearchParams({
-        token_key: "4637a43f8e8db38a97a5d68a110758d3",      // ← তোমার ZapUPI Token বসাও
-        secret_key: "40961dcda5338e0cad148a6838fc3dbb",    // ← তোমার ZapUPI Secret বসাও
+        token_key: "4637a43f8e8db38a97a5d68a110758d3",    // আপনার আসল ZapUPI token key বসান
+        secret_key: "40961dcda5338e0cad148a6838fc3dbb",  // আপনার আসল ZapUPI secret key বসান
         amount: amount,
         order_id: orderId
       }),
       {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        }
       }
     );
 
     const zapData = zap.data;
 
-    // Save order in DB
+    // Save in DB
     const db = readDB();
     db[orderId] = {
       orderId,
       amount,
       status: "PENDING",
-      utr_check: zapData.utr_check,
       payment_url: zapData.payment_url,
-      upi_intent: zapData.payment_data
+      upi_intent: zapData.payment_data,
+      utr_check: zapData.utr_check
     };
     writeDB(db);
 
@@ -68,10 +72,10 @@ app.post("/create-order", async (req, res) => {
       zapData
     });
 
-  } catch (err) {
+  } catch (error) {
     res.json({
       success: false,
-      error: err.message
+      error: error.message
     });
   }
 });
@@ -144,7 +148,7 @@ app.get("/payment/:id", (req, res) => {
 });
 
 // ---------------------------
-// Auto Status Check
+// Check Status (Auto Check)
 // ---------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
