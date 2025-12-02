@@ -5,39 +5,34 @@ const admin = require("firebase-admin");
 const app = express();
 app.use(express.json());
 
-// ---------------------------
-// Firebase Realtime Database
-// ---------------------------
-const serviceAccount = {
-  type: "service_account",
-  project_id: "flash-nf",
-  private_key_id: "ab193dd72988cc0293142541ae9ed6a76f120e7e",
-  private_key:"-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDoXIczwHW7h/kk\nUwbBKN4zytkl20KjL2HpnmiGJxuvhJaPl01cROoqUZoxDhyag81f3A6DjIua/ua5\nKMR9vXG6mswKUKX2DSX92psbbvj7j4BNI0DX3WzmLEStv8pdlu+Hf6UFRlCLWbk2\nGgi+8lBFJjtfYxwgZpgGj9ZssYbnvaH59T1J7d4JRiZ3lIswmTeOogCZ5Glz7R/M\nbbMB3x7HpYnLgLgIIyJbP2sm+f2mYybu/6s1v/N2vrWaGOYlBZSrz4+xiryTmAN0\nQMwtZkDF+/b/8vAkyHlw3EIR3ni1kOoOWmwZTdBSH1PhbNkI362/OJBrEJaj2ppf\nMTr3rqSRAgMBAAECggEAA8JmDXMeX/GtojO104QlgQvMqawrg168tDKqzZ2y3YHu\nMT8LZMQYhxMb10jW6iIRRq0VmAfEMuQq82OZgD5Mlzd7byDcaD6Z24F305wxRmvN\nMZJNMYV2/TCAqhlpmHCvLn0lBXVKPawTM6fGGoWhnJ+nVedIRsARCdHauV+vfkEa\nrm7HuMzz0fBMwZAeIQKAh/v8LCp3qyp1Vwi+W1Ah1/3nNKIcHzYQMPlHFDesHMSe\nwbOdpFPwiSR0c1oDCp4VIaMNBWICg0fht6L+IOe2CSa5AcxDOYYPP5TqnQf9I56F\nORzBUOj7rQ+O80hWUicBWncMNF4KjUkvCttEwAFD5QKBgQD4L/8fh7du44FaPTTM\nmkQxqOOzx07XL3nusXX5RtFfGXkyKSlMoT72OTa3k8QpSiceNika7vV/RQKJU/XH\n4vtjKLcbRuQZ8uCnWvKtPMRvXamZpb03QcgIfIgys/GfMd4KjHCeEXGtZltO/Iom\nscrFcwTPsn71QHtbum177kvwHQKBgQDvrP+SkYM1JsqxGX3VpeqOmMOvmAuYlN6L\nFdNa+HVzbPFtZdHuD+dX3flFdJc2aAsRe42BrLNKrF6jFw676RM68+Wnl1ovfvvX\nhSIh9yEWHuflbC75SioRAEqYzvhji/j2TvMb2GoY7N1S+guWI0Q+qVEkJyFkBNYD\nLiLAZLSEBQKBgHLKgE2tEAKR53o9ZPZdQ71USD0WqjiNFPB50/7/6kb6GTxCHX/7\n9Isd21j9V3VhfsZSdqCmdZXv7URnOP7C1VL/ufE70LTPyWiegC/wM0rvH0qZhfLQ\n0hxavQP2hoMDJZfrbQsvNkzlUsYtuBg9k3PPxyHphR8aO/QpPgpcJXNhAoGAIvgg\nyefFNwoT5McNXxC4KloLoyESAA8ocS6cCdfaex7YEtgaSxuy61UNu56JOXzwsHpQ\naS0jc6+2lyEUG0KkdaOETHF+zRM/93ALTN1bzHhx6T1hlSnG/XgHakg4YX3Ys0dN\nnTB0OnLE0Ah/jEZU/LeDiTzUWF2ERC6FD4Eh/WkCgYBXIT+C4QxLqCJPIvF4qCdv\nSH8FGGo/D8tjd8FT13OWR1KU5oRnvH3F/0+P8R10jO3GETEquR7c+Vvp4UoDvV4X\nCW+1D248bTnLDuy6TKKnRU501wug/JQDrOcg4Yd+9ODcfcxJTDtup+yjY80I0TJc\n6h33OuyI9/uawgdGhONpKw==\n-----END PRIVATE KEY-----\n"
-  client_email: "firebase-adminsdk-fbsvc@flash-nf.iam.gserviceaccount.com",
-  client_id: "113143569037330676591"
-};
-
+// -------------------------------------
+// Firebase Admin Initialization (Render Safe)
+// -------------------------------------
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://flash-nf-default-rtdb.firebaseio.com"
+  credential: admin.credential.cert({
+    project_id: process.env.FIREBASE_PROJECT_ID,
+    private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    client_email: process.env.FIREBASE_CLIENT_EMAIL
+  }),
+  databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}-default-rtdb.firebaseio.com`
 });
 
 const db = admin.database();
 
-// ---------------------------
+// -------------------------------------
 // Root
-// ---------------------------
+// -------------------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI Payment Gateway Live with Firebase 🔥");
+  res.send("ZapUPI Backend Live with Firebase 🔥");
 });
 
-// ---------------------------
-// Create Order
-// ---------------------------
+// -------------------------------------
+// Create Order (ZapUPI)
+// -------------------------------------
 app.post("/create-order", async (req, res) => {
   let amount = req.body.amount || 1;
 
-  // prevent 1.04 / 1.07 problem
+  // Fix: avoid 1.04 / 1.07 issue
   amount = parseInt(amount);
 
   const orderId = "ORD" + Date.now();
@@ -46,8 +41,8 @@ app.post("/create-order", async (req, res) => {
     const zap = await axios.post(
       "https://api.zapupi.com/api/create-order",
       new URLSearchParams({
-        token_key: "4637a43f8e8db38a97a5d68a110758d3",
-        secret_key: "40961dcda5338e0cad148a6838fc3dbb",
+        token_key: process.env.ZAP_TOKEN_KEY,
+        secret_key: process.env.ZAP_SECRET_KEY,
         amount: amount,
         order_id: orderId
       }),
@@ -56,7 +51,6 @@ app.post("/create-order", async (req, res) => {
 
     const zapData = zap.data;
 
-    // Save to Firebase
     await db.ref("orders/" + orderId).set({
       orderId,
       amount,
@@ -68,7 +62,7 @@ app.post("/create-order", async (req, res) => {
     res.json({
       success: true,
       orderId,
-      payment_page: `https://oopppp.onrender.com/payment/${orderId}`,
+      payment_page: `${process.env.BASE_URL}/payment/${orderId}`,
       zapData
     });
 
@@ -77,9 +71,9 @@ app.post("/create-order", async (req, res) => {
   }
 });
 
-// ---------------------------
-// Payment Page
-// ---------------------------
+// -------------------------------------
+// Payment Page (SkillClash Style)
+// -------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
 
@@ -131,9 +125,9 @@ app.get("/payment/:id", async (req, res) => {
   res.send(html);
 });
 
-// ---------------------------
-// Check Status
-// ---------------------------
+// -------------------------------------
+// Auto Check Payment Status
+// -------------------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
   const snap = await db.ref("orders/" + id).once("value");
@@ -151,11 +145,11 @@ app.get("/check-status/:id", async (req, res) => {
 
     res.json({ status: zapStatus.data.status });
 
-  } catch {
+  } catch (e) {
     res.json({ status: order.status });
   }
 });
 
-// ---------------------------
+// -------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server Running:", PORT));
+app.listen(PORT, () => console.log("Server Running on PORT", PORT));
