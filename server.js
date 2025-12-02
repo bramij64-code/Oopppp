@@ -1,110 +1,139 @@
 // server.js
 const express = require("express");
 const bodyParser = require("body-parser");
-const admin = require("firebase-admin");
+const cors = require("cors");
 
 const app = express();
+app.use(cors());
 app.use(bodyParser.json());
 
-// ---------- ENV check ----------
-const requiredEnv = [
-  "FIREBASE_PROJECT_ID",
-  "FIREBASE_CLIENT_EMAIL",
-  "FIREBASE_PRIVATE_KEY", // should contain \n sequences OR actual newlines
-  "FIREBASE_PRIVATE_KEY_ID",
-  "FIREBASE_CLIENT_ID",
-  "FIREBASE_CLIENT_X509",
-  // optional: UPI_ID
-];
-for (const k of requiredEnv) {
-  if (!process.env[k]) {
-    console.warn(`[WARN] env ${k} not set`);
-  }
-}
+const PORT = process.env.PORT || 3000;
 
-// Build service account object from env
-const serviceAccount = {
-  type: "service_account",
-  project_id: process.env.FIREBASE_PROJECT_ID || "",
-  private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID || "",
-  private_key: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
-  client_email: process.env.FIREBASE_CLIENT_EMAIL || "",
-  client_id: process.env.FIREBASE_CLIENT_ID || "",
-  auth_uri: "https://accounts.google.com/o/oauth2/auth",
-  token_uri: "https://oauth2.googleapis.com/token",
-  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-  client_x509_cert_url: process.env.FIREBASE_CLIENT_X509 || ""
-};
+let admin = null;
+let db = null;
+let firebaseEnabled = false;
 
-let db;
-try {
-  // If already initialized (hot reload), skip
-  if (!admin.apps.length) {
+function tryInitFirebase() {
+  try {
+    // require here so deploy doesn't fail when firebase-admin isn't configured
+    admin = require("firebase-admin");
+
+    // read required env vars
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY; // provided with literal \n OR already real newlines
+    const privateKeyId = process.env.FIREBASE_PRIVATE_KEY_ID || "";
+    const clientX509 = process.env.FIREBASE_CLIENT_X509 || "";
+
+    if (!projectId || !clientEmail || !privateKey) {
+      console.warn("Firebase env vars missing: FIREBASE_PROJECT_ID or FIREBASE_CLIENT_EMAIL or FIREBASE_PRIVATE_KEY");
+      firebaseEnabled = false;
+      return;
+    }
+
+    const serviceAccount = {
+      type: "service_account",
+      project_id: projectId,
+      private_key_id: privateKeyId,
+      private_key: privateKey.includes("\\n") ? privateKey.replace(/\\n/g, "\n") : privateKey,
+      client_email: clientEmail,
+      client_id: process.env.FIREBASE_CLIENT_ID || "",
+      auth_uri: "https://accounts.google.com/o/oauth2/auth",
+      token_uri: "https://oauth2.googleapis.com/token",
+      auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+      client_x509_cert_url: clientX509
+    };
+
+    // init firebase
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+      credential: admin.credential.cert(serviceAccount),
     });
-    console.log("Firebase initialized");
-  } else {
-    console.log("Firebase already initialized");
-  }
-  db = admin.firestore();
-} catch (err) {
-  console.error("Firebase init error:", err && err.stack ? err.stack : err);
-  // continue – route handlers will handle missing db
-}
 
-// ---------- helper ----------
-function devErrorResponse(res, err) {
-  const isProd = process.env.NODE_ENV === "production";
-  if (!isProd) {
-    return res.status(500).json({ success: false, error: "Server Error", detail: err && (err.stack || err.message || err) });
-  } else {
-    return res.status(500).json({ success: false, error: "Server Error" });
+    db = admin.firestore();
+    firebaseEnabled = true;
+    console.log("Firebase initialized ✅");
+  } catch (e) {
+    console.error("Firebase init failed:", e && e.message ? e.message : e);
+    firebaseEnabled = false;
   }
 }
 
-// ---------- routes ----------
+// Try init at startup
+tryInitFirebase();
+
 app.get("/", (req, res) => {
-  res.json({ success: true, message: "Server running", env: process.env.NODE_ENV || "development" });
+  res.json({ ok: true, firebase: firebaseEnabled });
 });
 
 app.post("/create-order", async (req, res) => {
   try {
-    const { amount } = req.body;
-    if (!amount) return res.status(400).json({ success: false, error: "Amount required" });
-
-    // generate txn id
-    const txnId = `ORD${Date.now()}`;
-
-    // example payment URL (you can change to zapupi payment url logic)
-    const upiId = process.env.UPI_ID || "your-upi@bank";
-    const paymentUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&am=${encodeURIComponent(amount)}&tn=${encodeURIComponent(txnId)}`;
-
-    // Save to firestore if db exists
-    if (!db) {
-      console.warn("Firestore not initialized, skipping save.");
-    } else {
-      await db.collection("payments").doc(txnId).set({
-        txnId,
-        amount,
-        paymentUrl,
-        status: "PENDING",
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-      });
+    // basic validation
+    const body = req.body;
+    if (!body || typeof body !== "object") {
+      return res.status(400).json({ success: false, error: "Invalid JSON body" });
     }
 
-    return res.json({ success: true, txnId, amount, paymentUrl });
+    const amount = Number(body.amount || body.am || body.AMOUNT);
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, error: "Amount required and must be > 0" });
+    }
+
+    // create txn id
+    const txnId = "ORD" + Date.now();
+
+    // build payment url - you can change UPI_ID env var or logic
+    const upiId = process.env.UPI_ID || "your-upi@bank";
+    const paymentUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(process.env.PAYEE_NAME || "SkillClash")}&am=${amount}&tn=${encodeURIComponent("Order " + txnId)}&tid=${txnId}`;
+
+    // prepare record
+    const record = {
+      txnId,
+      amount,
+      paymentUrl,
+      status: "PENDING",
+      createdAt: Date.now()
+    };
+
+    // Write to Firestore only if enabled
+    if (firebaseEnabled && db) {
+      try {
+        await db.collection("payments").doc(txnId).set(record);
+        console.log("Saved payment record to Firestore:", txnId);
+      } catch (e) {
+        // log but don't crash the whole endpoint
+        console.error("Firestore write failed:", e && e.message ? e.message : e);
+        // optionally set firebaseEnabled = false if irrecoverable
+      }
+    } else {
+      console.log("Firebase disabled — skipping Firestore write. Generated record:", record);
+    }
+
+    return res.json({
+      success: true,
+      txnId,
+      amount,
+      paymentUrl
+    });
+
   } catch (err) {
-    console.error("Create-order error:", err && (err.stack || err));
-    return devErrorResponse(res, err);
+    console.error("create-order error:", err && err.stack ? err.stack : err);
+    return res.status(500).json({ success: false, error: "Server Error" });
   }
 });
 
-// health check route to ensure POST works (GET to test)
-app.get("/health", (req, res) => res.json({ ok: true, time: Date.now() }));
+// Helpful health route to show env info (non-secret)
+app.get("/_health", (req, res) => {
+  res.json({
+    ok: true,
+    firebaseEnabled,
+    env: {
+      FIREBASE_PROJECT_ID: !!process.env.FIREBASE_PROJECT_ID,
+      FIREBASE_CLIENT_EMAIL: !!process.env.FIREBASE_CLIENT_EMAIL,
+      UPI_ID: !!process.env.UPI_ID
+    }
+  });
+});
 
-// ---------- start ----------
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Server listening on ${port}`);
+app.listen(PORT, () => {
+  console.log(`Server listening on ${PORT}`);
 });
