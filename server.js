@@ -1,69 +1,96 @@
 const express = require("express");
 const axios = require("axios");
-const fs = require("fs");
+const admin = require("firebase-admin");
 
 const app = express();
 app.use(express.json());
 
 // ---------------------------
-// Database file
+// Firebase Realtime Database
 // ---------------------------
-const DB = "orders.json";
-if (!fs.existsSync(DB)) fs.writeFileSync(DB, JSON.stringify({}));
+const serviceAccount = {
+  type: "service_account",
+  project_id: "flash-nf",
+  private_key_id: "ab193dd72988cc0293142541ae9ed6a76f120e7e",
+  private_key: "-----BEGIN PRIVATE KEY-----
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDoXIczwHW7h/kk
+UwbBKN4zytkl20KjL2HpnmiGJxuvhJaPl01cROoqUZoxDhyag81f3A6DjIua/ua5
+KMR9vXG6mswKUKX2DSX92psbbvj7j4BNI0DX3WzmLEStv8pdlu+Hf6UFRlCLWbk2
+Ggi+8lBFJjtfYxwgZpgGj9ZssYbnvaH59T1J7d4JRiZ3lIswmTeOogCZ5Glz7R/M
+bbMB3x7HpYnLgLgIIyJbP2sm+f2mYybu/6s1v/N2vrWaGOYlBZSrz4+xiryTmAN0
+QMwtZkDF+/b/8vAkyHlw3EIR3ni1kOoOWmwZTdBSH1PhbNkI362/OJBrEJaj2ppf
+MTr3rqSRAgMBAAECggEAA8JmDXMeX/GtojO104QlgQvMqawrg168tDKqzZ2y3YHu
+MT8LZMQYhxMb10jW6iIRRq0VmAfEMuQq82OZgD5Mlzd7byDcaD6Z24F305wxRmvN
+MZJNMYV2/TCAqhlpmHCvLn0lBXVKPawTM6fGGoWhnJ+nVedIRsARCdHauV+vfkEa
+rm7HuMzz0fBMwZAeIQKAh/v8LCp3qyp1Vwi+W1Ah1/3nNKIcHzYQMPlHFDesHMSe
+wbOdpFPwiSR0c1oDCp4VIaMNBWICg0fht6L+IOe2CSa5AcxDOYYPP5TqnQf9I56F
+ORzBUOj7rQ+O80hWUicBWncMNF4KjUkvCttEwAFD5QKBgQD4L/8fh7du44FaPTTM
+mkQxqOOzx07XL3nusXX5RtFfGXkyKSlMoT72OTa3k8QpSiceNika7vV/RQKJU/XH
+4vtjKLcbRuQZ8uCnWvKtPMRvXamZpb03QcgIfIgys/GfMd4KjHCeEXGtZltO/Iom
+scrFcwTPsn71QHtbum177kvwHQKBgQDvrP+SkYM1JsqxGX3VpeqOmMOvmAuYlN6L
+FdNa+HVzbPFtZdHuD+dX3flFdJc2aAsRe42BrLNKrF6jFw676RM68+Wnl1ovfvvX
+hSIh9yEWHuflbC75SioRAEqYzvhji/j2TvMb2GoY7N1S+guWI0Q+qVEkJyFkBNYD
+LiLAZLSEBQKBgHLKgE2tEAKR53o9ZPZdQ71USD0WqjiNFPB50/7/6kb6GTxCHX/7
+9Isd21j9V3VhfsZSdqCmdZXv7URnOP7C1VL/ufE70LTPyWiegC/wM0rvH0qZhfLQ
+0hxavQP2hoMDJZfrbQsvNkzlUsYtuBg9k3PPxyHphR8aO/QpPgpcJXNhAoGAIvgg
+yefFNwoT5McNXxC4KloLoyESAA8ocS6cCdfaex7YEtgaSxuy61UNu56JOXzwsHpQ
+aS0jc6+2lyEUG0KkdaOETHF+zRM/93ALTN1bzHhx6T1hlSnG/XgHakg4YX3Ys0dN
+nTB0OnLE0Ah/jEZU/LeDiTzUWF2ERC6FD4Eh/WkCgYBXIT+C4QxLqCJPIvF4qCdv
+SH8FGGo/D8tjd8FT13OWR1KU5oRnvH3F/0+P8R10jO3GETEquR7c+Vvp4UoDvV4X
+CW+1D248bTnLDuy6TKKnRU501wug/JQDrOcg4Yd+9ODcfcxJTDtup+yjY80I0TJc
+6h33OuyI9/uawgdGhONpKw==
+-----END PRIVATE KEY-----"
+  client_email: "firebase-adminsdk-fbsvc@flash-nf.iam.gserviceaccount.com",
+  client_id: "113143569037330676591"
+};
 
-function readDB() {
-  return JSON.parse(fs.readFileSync(DB));
-}
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: "https://flash-nf-default-rtdb.firebaseio.com"
+});
 
-function writeDB(data) {
-  fs.writeFileSync(DB, JSON.stringify(data, null, 2));
-}
+const db = admin.database();
 
 // ---------------------------
-// Root Route
+// Root
 // ---------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI Payment Gateway Live 🔥");
+  res.send("ZapUPI Payment Gateway Live with Firebase 🔥");
 });
 
 // ---------------------------
-// Create Order (ZapUPI)
+// Create Order
 // ---------------------------
 app.post("/create-order", async (req, res) => {
-  const amount = req.body.amount || 10;
+  let amount = req.body.amount || 1;
 
-  // IMPORTANT: underscore (_) ব্যবহার করা যাবে না
+  // prevent 1.04 / 1.07 problem
+  amount = parseInt(amount);
+
   const orderId = "ORD" + Date.now();
 
   try {
     const zap = await axios.post(
       "https://api.zapupi.com/api/create-order",
       new URLSearchParams({
-        token_key: "4637a43f8e8db38a97a5d68a110758d3",    // আপনার আসল ZapUPI token key বসান
-        secret_key: "40961dcda5338e0cad148a6838fc3dbb",  // আপনার আসল ZapUPI secret key বসান
+        token_key: "4637a43f8e8db38a97a5d68a110758d3",
+        secret_key: "40961dcda5338e0cad148a6838fc3dbb",
         amount: amount,
         order_id: orderId
       }),
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        }
-      }
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
 
     const zapData = zap.data;
 
-    // Save in DB
-    const db = readDB();
-    db[orderId] = {
+    // Save to Firebase
+    await db.ref("orders/" + orderId).set({
       orderId,
       amount,
       status: "PENDING",
       payment_url: zapData.payment_url,
-      upi_intent: zapData.payment_data,
       utr_check: zapData.utr_check
-    };
-    writeDB(db);
+    });
 
     res.json({
       success: true,
@@ -73,28 +100,25 @@ app.post("/create-order", async (req, res) => {
     });
 
   } catch (error) {
-    res.json({
-      success: false,
-      error: error.message
-    });
+    res.json({ success: false, error: error.message });
   }
 });
 
 // ---------------------------
-// Payment Page (SkillClash Style)
+// Payment Page
 // ---------------------------
-app.get("/payment/:id", (req, res) => {
+app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
-  const db = readDB();
 
-  if (!db[id]) return res.send("Invalid Order ID");
+  const snap = await db.ref("orders/" + id).once("value");
+  if (!snap.exists()) return res.send("Invalid Order ID");
 
-  const { amount, payment_url, upi_intent } = db[id];
+  const { amount, payment_url } = snap.val();
 
   const html = `
   <html>
   <body style="font-family: Arial; text-align: center; padding-top: 40px;">
-    
+
       <h2>Add Money ₹${amount}</h2>
       <p>Order ID: ${id}</p>
 
@@ -109,19 +133,6 @@ app.get("/payment/:id", (req, res) => {
           border-radius: 10px;
           font-size: 18px;
         ">Pay Using QR</button>
-      </a>
-
-      <br><br>
-
-      <a href="${upi_intent}">
-        <button style="
-          padding: 12px 22px;
-          background: #2962ff;
-          color: white;
-          border: none;
-          border-radius: 10px;
-          font-size: 18px;
-        ">Pay Using UPI App</button>
       </a>
 
       <br><br>
@@ -148,35 +159,28 @@ app.get("/payment/:id", (req, res) => {
 });
 
 // ---------------------------
-// Check Status (Auto Check)
+// Check Status
 // ---------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
-  const db = readDB();
+  const snap = await db.ref("orders/" + id).once("value");
 
-  if (!db[id]) return res.json({ error: "Invalid order" });
+  if (!snap.exists()) return res.json({ error: "Invalid order" });
+
+  const order = snap.val();
 
   try {
-    // Check live status from ZapUPI
-    const zapStatus = await axios.get(db[id].utr_check);
+    const zapStatus = await axios.get(order.utr_check);
 
     if (zapStatus.data.status === "PAID") {
-      db[id].status = "PAID";
-      writeDB(db);
+      await db.ref("orders/" + id).update({ status: "PAID" });
     }
 
-    res.json({ status: db[id].status });
+    res.json({ status: zapStatus.data.status });
 
-  } catch (e) {
-    res.json({ status: db[id].status });
+  } catch {
+    res.json({ status: order.status });
   }
-});
-
-// ---------------------------
-// Health Check
-// ---------------------------
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
 });
 
 // ---------------------------
