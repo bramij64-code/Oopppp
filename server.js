@@ -39,8 +39,8 @@ app.post("/create-order", async (req, res) => {
     const zap = await axios.post(
       "https://api.zapupi.com/api/create-order",
       new URLSearchParams({
-        token_key: "YOUR_TOKEN_KEY",    // আপনার আসল ZapUPI token key বসান
-        secret_key: "YOUR_SECRET_KEY",  // আপনার আসল ZapUPI secret key বসান
+        token_key: "4637a43f8e8db38a97a5d68a110758d3",    // আপনার আসল ZapUPI token key বসান
+        secret_key: "40961dcda5338e0cad148a6838fc3dbb",  // আপনার আসল ZapUPI secret key বসান
         amount: amount,
         order_id: orderId
       }),
