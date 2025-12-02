@@ -1,94 +1,113 @@
 import express from "express";
 import axios from "axios";
 import admin from "firebase-admin";
-import path from "path";
-import { fileURLToPath } from "url";
+import cors from "cors";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const app = express();
-app.use(express.json());
-
-// ---------------- FIREBASE SETUP ----------------
+// ---------------------------
+//  FIREBASE ADMIN CONFIG
+// ---------------------------
 admin.initializeApp({
   credential: admin.credential.cert({
     project_id: process.env.FIREBASE_PROJ,
     client_email: process.env.FIREBASE_CLIE,
-    private_key: process.env.FIREBASE_PRIV.replace(/\\n/g, "\n"),
+    private_key: process.env.FIREBASE_PRIV, // NO replace() needed
   }),
 });
 
 const db = admin.firestore();
 
-// ---------------- CREATE ORDER ----------------
+// ---------------------------
+//  EXPRESS SETUP
+// ---------------------------
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+app.get("/", (req, res) => {
+  res.send("🔥 ZapUPI Payment Server Live!");
+});
+
+// ---------------------------
+//  CREATE ORDER API
+// ---------------------------
+
 app.post("/create-order", async (req, res) => {
   try {
     const amount = req.body.amount;
-    if (!amount) return res.json({ success: false, error: "Amount missing" });
+    if (!amount) {
+      return res.json({
+        success: false,
+        message: "Amount missing",
+      });
+    }
 
+    // CLIENT SIDE ORDER ID
     const orderId = "ORD" + Date.now();
 
-    // Call ZapUPI
-    const zap = await axios.post(
+    // CALL ZapUPI API
+    const zapRes = await axios.post(
       "https://api.zapupi.com/api/create-order",
-      new URLSearchParams({
+      {
         token_key: process.env.ZAP_TOKEN,
         secret_key: process.env.ZAP_SECRET,
         amount: amount,
         order_id: orderId,
-      })
+      }
     );
 
-    const zapData = zap.data;
+    const zapData = zapRes.data;
 
-    if (zapData.status !== "success") {
-      return res.json({ success: false, error: zapData.message });
-    }
-
-    // Save to Firestore
-    await db.collection("payments").doc(orderId).set({
-      orderId,
-      amount,
+    // SAVE ORDER IN FIRESTORE
+    await db.collection("orders").doc(orderId).set({
+      orderId: orderId,
+      amount: amount,
+      zapData: zapData,
       status: "PENDING",
-      payment_url: zapData.payment_url || null,
-      createdAt: Date.now(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     res.json({
       success: true,
-      orderId,
-      payment_page: `https://oopppp.onrender.com/payment/${orderId}`,
-      zapData,
+      orderId: orderId,
+      zapData: zapData,
     });
   } catch (err) {
-    console.error(err);
-    res.json({ success: false, error: err.message });
+    res.json({
+      success: false,
+      error: err.message,
+    });
   }
 });
 
-// ---------------- PAYMENT PAGE ----------------
-app.get("/payment/:id", async (req, res) => {
-  const orderId = req.params.id;
+// ---------------------------
+//  PAYMENT PAGE
+// ---------------------------
 
-  const doc = await db.collection("payments").doc(orderId).get();
-  if (!doc.exists) return res.send("Invalid Order ID");
+app.get("/payment/:orderId", async (req, res) => {
+  const orderId = req.params.orderId;
 
-  const data = doc.data();
+  const snap = await db.collection("orders").doc(orderId).get();
 
-  res.send(`
-    <h2>Payment Page</h2>
-    <p>Order: ${data.orderId}</p>
-    <p>Amount: ₹${data.amount}</p>
-    <a href="${data.payment_url}">
-      <button style="padding:10px;font-size:20px;">Pay Now</button>
-    </a>
-  `);
+  if (!snap.exists) {
+    return res.send("Invalid Order ID");
+  }
+
+  const data = snap.data();
+  const payUrl = data?.zapData?.payment_url;
+
+  if (!payUrl) {
+    return res.send("Payment link not found!");
+  }
+
+  res.redirect(payUrl);
 });
 
-// ---------------- DEFAULT ROUTE ----------------
-app.get("/", (req, res) => {
-  res.send("ZapUPI Payment Gateway Live 🔥");
-});
+// ---------------------------
+//  START SERVER
+// ---------------------------
 
-app.listen(3000, () => console.log("Server Running on 3000"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("Server running on PORT " + PORT);
+});
