@@ -42,7 +42,7 @@ app.post("/create-payment", async (req, res) => {
     }
 
     // ✔ Create Payment in ZapUPI
-    const response = await axios.post("https://api.zapupi.com/payment", {
+    const response = await axios.post("https://oopppp.onrender.com/payment", {
       amount: amount,
       upi_id: process.env.ZAPUPI_UPI,
       note: "Game Coins"
@@ -89,7 +89,7 @@ app.post("/verify", async (req, res) => {
     if (!txnId) return res.json({ success: false, error: "txnId missing" });
 
     // ✔ Call ZapUPI Verify
-    const verify = await axios.post("https://api.zapupi.com/verify", {
+    const verify = await axios.post("https://oopppp.onrender.com/verify", {
       txnId
     }, {
       headers: {
