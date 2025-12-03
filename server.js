@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json());
 
 // -------------------------------------
-// Firebase Admin Initialization (Render Safe)
+// Firebase Admin SDK (Render-friendly)
 // -------------------------------------
 admin.initializeApp({
   credential: admin.credential.cert({
@@ -23,7 +23,7 @@ const db = admin.database();
 // Root
 // -------------------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI Backend Live with Firebase 🔥");
+  res.send("ZapUPI Payment Gateway with Firebase ✔ Running Successfully 🔥");
 });
 
 // -------------------------------------
@@ -32,7 +32,7 @@ app.get("/", (req, res) => {
 app.post("/create-order", async (req, res) => {
   let amount = req.body.amount || 1;
 
-  // Fix: avoid 1.04 / 1.07 issue
+  // 1.04, 1.07 issue fix
   amount = parseInt(amount);
 
   const orderId = "ORD" + Date.now();
@@ -51,19 +51,33 @@ app.post("/create-order", async (req, res) => {
 
     const zapData = zap.data;
 
+    // Extract Correct Fields
+    const payment_url = zapData.payment_url;
+    const utr_check = zapData.utr_check;
+
+    // Validate response
+    if (!payment_url || !utr_check) {
+      return res.json({
+        success: false,
+        error: "ZapUPI error: payment_url or utr_check missing"
+      });
+    }
+
+    // Save to Firebase
     await db.ref("orders/" + orderId).set({
       orderId,
       amount,
       status: "PENDING",
-      payment_url: zapData.payment_url,
-      utr_check: zapData.utr_check
+      payment_url,
+      utr_check
     });
 
     res.json({
       success: true,
       orderId,
       payment_page: `${process.env.BASE_URL}/payment/${orderId}`,
-      zapData
+      payment_url,
+      utr_check
     });
 
   } catch (error) {
@@ -72,13 +86,13 @@ app.post("/create-order", async (req, res) => {
 });
 
 // -------------------------------------
-// Payment Page (SkillClash Style)
+// Payment Page (SkillClash UI)
 // -------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
-
   const snap = await db.ref("orders/" + id).once("value");
-  if (!snap.exists()) return res.send("Invalid Order ID");
+
+  if (!snap.exists()) return res.send("Invalid Order ID ❌");
 
   const { amount, payment_url } = snap.val();
 
@@ -151,5 +165,7 @@ app.get("/check-status/:id", async (req, res) => {
 });
 
 // -------------------------------------
+// Start Server
+// -------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server Running on PORT", PORT));
+app.listen(PORT, () => console.log(`Server Running at Port ${PORT} ✔`));
