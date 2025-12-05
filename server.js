@@ -8,7 +8,7 @@ const cors = require("cors");
 
 const app = express();
 
-// Enable CORS (💯 Netlify → Render fetch FIX)
+// Enable CORS (Netlify → Render Fetch Fix)
 app.use(cors());
 
 // Parse JSON body
@@ -43,7 +43,7 @@ app.get("/", (req, res) => {
 });
 
 // ---------------------------------------------
-// 💰 CREATE ORDER (MAIN API)
+// 💰 CREATE ORDER (WORKING & FIXED)
 // ---------------------------------------------
 app.post("/create-order", async (req, res) => {
   try {
@@ -53,16 +53,20 @@ app.post("/create-order", async (req, res) => {
     const params = new URLSearchParams({
       amount: amount,
       order_id: orderId,
-      remark: "Recharge",
-      token_key: process.env.ZAP_TOKEN_KEY,
-      secret_key: process.env.ZAP_SECRET_KEY
+      remark: "Recharge"
     });
 
-    // ✔ Correct ZapUPI Create Order API
+    // ✔ ZapUPI correct headers (403 FIXED)
     const zap = await axios.post(
       "https://zapupi.com/api/deposit/create",
       params,
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Authorization": `Bearer ${process.env.ZAP_TOKEN_KEY}`,
+          "x-secret-key": process.env.ZAP_SECRET_KEY
+        }
+      }
     );
 
     console.log("ZapUPI Order Response:", zap.data);
@@ -92,12 +96,12 @@ app.post("/create-order", async (req, res) => {
 
   } catch (err) {
     console.log("Order Error:", err.response?.data || err.message);
-    res.json({ success: false, error: err.message });
+    res.json({ success: false, error: err.response?.data || err.message });
   }
 });
 
 // ---------------------------------------------
-// PAYMENT PAGE
+// PAYMENT PAGE (UI + Auto Status Checker)
 // ---------------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
@@ -151,7 +155,7 @@ app.get("/success/:id", (req, res) => {
 });
 
 // ---------------------------------------------
-// CHECK STATUS (Auto Verify)
+// CHECK STATUS (Auto Verify via utr_check URL)
 // ---------------------------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
@@ -176,7 +180,7 @@ app.get("/check-status/:id", async (req, res) => {
 });
 
 // ---------------------------------------------
-// 🔔 WEBHOOK (Auto Payment Success)
+// 🔔 WEBHOOK (Optional but Recommended)
 // ---------------------------------------------
 app.post("/zapupi-webhook", async (req, res) => {
   try {
