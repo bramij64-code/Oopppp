@@ -1,22 +1,13 @@
-// ---------------------------------------------
-// IMPORTS
-// ---------------------------------------------
 const express = require("express");
 const axios = require("axios");
 const admin = require("firebase-admin");
-const cors = require("cors");
 
 const app = express();
-
-// Enable CORS (Netlify → Render fix)
-app.use(cors());
-
-// Parse JSON
 app.use(express.json());
 
-// ---------------------------------------------
-// FIREBASE INITIALIZATION
-// ---------------------------------------------
+// -------------------------------------
+// Firebase Admin Initialization
+// -------------------------------------
 admin.initializeApp({
   credential: admin.credential.cert({
     project_id: process.env.FIREBASE_PROJECT_ID,
@@ -28,179 +19,181 @@ admin.initializeApp({
 
 const db = admin.database();
 
-// ---------------------------------------------
-// GENERATE ORDER ID
-// ---------------------------------------------
+// -------------------------------------
+// ORDER ID GENERATOR
+// -------------------------------------
 function generateOrderID() {
-  return "ORD" + Date.now() + Math.floor(Math.random() * 1000);
+  return "ORD" + Date.now() + Math.floor(Math.random() * 10000);
 }
 
-// ---------------------------------------------
-// ROOT ROUTE
-// ---------------------------------------------
+// -------------------------------------
+// ROOT
+// -------------------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI + Firebase Server Running Successfully 😎🚀");
+  res.send("ZapUPI Payment Server Live ✔");
 });
 
-// ---------------------------------------------
-// 💰 CREATE ORDER (FIXED ZAPUPI API + NO 403)
-// ---------------------------------------------
+// -------------------------------------
+// CREATE ORDER
+// -------------------------------------
 app.post("/create-order", async (req, res) => {
+  let amount = parseInt(req.body.amount || 1);
+  const orderId = generateOrderID();
+
   try {
-    const amount = parseInt(req.body.amount || 1);
-    const orderId = generateOrderID();
-
-    const params = new URLSearchParams({
-      amount: amount,
-      order_id: orderId,
-      remark: "Recharge"
-    });
-
-    // ✔ CORRECT ZapUPI API URL (NO 403)
     const zap = await axios.post(
-      "https://api.zapupi.com/deposit/create",
-      params,
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Authorization": `Bearer ${process.env.ZAP_TOKEN_KEY}`,
-          "x-secret-key": process.env.ZAP_SECRET_KEY
-        }
-      }
+      "https://api.zapupi.com/api/create-order",
+      new URLSearchParams({
+        token_key: process.env.ZAP_TOKEN_KEY,
+        secret_key: process.env.ZAP_SECRET_KEY,
+        amount: amount,
+        order_id: orderId,
+        success_url: `${process.env.BASE_URL}/success/${orderId}`,
+        fail_url: `${process.env.BASE_URL}/fail/${orderId}`
+      }),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
 
-    console.log("ZapUPI Response:", zap.data);
+    const zapData = zap.data;
 
-    if (!zap.data.payment_url) {
-      return res.json({ success: false, error: "ZapUPI did not send payment_url" });
+    if (!zapData.payment_url) {
+      return res.json({
+        success: false,
+        error: "ZapUPI didn't return payment_url"
+      });
     }
 
-    // Save order in Firebase
     await db.ref("orders/" + orderId).set({
       orderId,
       amount,
       status: "PENDING",
-      payment_url: zap.data.payment_url,
-      utr_check: zap.data.utr_check
+      payment_url: zapData.payment_url,
+      utr_check: zapData.utr_check
     });
 
     res.json({
       success: true,
       orderId,
-      payment_page: `${process.env.BASE_URL}/payment/${orderId}`,
-      payment_url: zap.data.payment_url
+      payment_page: `${process.env.BASE_URL}/payment/${orderId}`
     });
 
-  } catch (err) {
-    console.log("Order Error:", err.response?.data || err.message);
-    res.json({ success: false, error: err.response?.data || err.message });
+  } catch (error) {
+    res.json({ success: false, error: error.message });
   }
 });
 
-// ---------------------------------------------
-// PAYMENT PAGE (Auto Check)
-// ---------------------------------------------
+// -------------------------------------
+// PAYMENT PAGE (SkillClash Style)
+// -------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
-
   const snap = await db.ref("orders/" + id).once("value");
+
   if (!snap.exists()) return res.send("Invalid Order ❌");
 
   const { amount, payment_url } = snap.val();
 
   const html = `
   <html>
-  <body style="font-family:Arial;text-align:center;margin-top:40px;">
-  
-  <h2>Add Money ₹${amount}</h2>
-  <p>Order ID: ${id}</p>
+  <body style="font-family: Arial; text-align: center; padding-top: 40px;">
 
-  <a href="${payment_url}">
-    <button style="padding:12px 22px;background:#00c853;color:white;border:none;border-radius:10px;font-size:18px;">
-      Pay Now
-    </button>
-  </a>
+      <h2>Add Money ₹${amount}</h2>
+      <p>Order ID: ${id}</p>
 
-  <h3>Waiting for Payment...</h3>
+      <a href="${payment_url}">
+        <button style="padding: 12px 22px; background: #00c853; color: white; border: none; border-radius: 10px; font-size: 18px;">
+          Pay Now
+        </button>
+      </a>
 
-  <script>
-    setInterval(async () => {
-      let res = await fetch("/check-status/${id}");
-      let data = await res.json();
-      if (data.status === "PAID") {
-        location.href = "/success/${id}";
-      }
-    }, 2000);
-  </script>
+      <h3 id="msg">Waiting for payment...</h3>
+
+      <script>
+        setInterval(async () => {
+          let res = await fetch("/check-status/${id}");
+          let data = await res.json();
+
+          if (data.status === "PAID") {
+            location.href = "/success/${id}";
+          }
+        }, 2000);
+      </script>
 
   </body>
-  </html>
-  `;
+  </html>`;
 
   res.send(html);
 });
 
-// ---------------------------------------------
+// -------------------------------------
 // SUCCESS PAGE
-// ---------------------------------------------
+// -------------------------------------
 app.get("/success/:id", (req, res) => {
   res.send(`
-    <h1 style="color:green;">Payment Successful 🎉</h1>
-    <p>Coins Added Successfully 🪙</p>
+    <h1 style="color: green;">Payment Successful 🎉</h1>
+    <p>Your money has been added successfully.</p>
   `);
 });
 
-// ---------------------------------------------
-// CHECK STATUS (UTR Auto Verify)
-// ---------------------------------------------
+// -------------------------------------
+// FAIL PAGE
+// -------------------------------------
+app.get("/fail/:id", (req, res) => {
+  res.send(`
+    <h1 style="color: red;">Payment Failed ❌</h1>
+    <p>Please try again.</p>
+  `);
+});
+
+// -------------------------------------
+// CHECK STATUS (UTR CHECK API)
+// -------------------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
-
   const snap = await db.ref("orders/" + id).once("value");
+
   if (!snap.exists()) return res.json({ status: "INVALID" });
 
   const order = snap.val();
 
   try {
-    const zap = await axios.get(order.utr_check);
+    const zapStatus = await axios.get(order.utr_check);
 
-    if (zap.data.status === "PAID") {
+    if (zapStatus.data.status === "PAID") {
       await db.ref("orders/" + id).update({ status: "PAID" });
     }
 
-    res.json({ status: zap.data.status });
+    res.json({ status: zapStatus.data.status });
 
-  } catch (err) {
+  } catch (e) {
     res.json({ status: order.status });
   }
 });
 
-// ---------------------------------------------
-// ZAPUPI WEBHOOK (OPTIONAL)
-// ---------------------------------------------
+// -------------------------------------
+// ZAPUPI WEBHOOK (AUTO VERIFY)
+// -------------------------------------
 app.post("/zapupi-webhook", async (req, res) => {
-  try {
-    console.log("Webhook:", req.body);
+  const { order_id, status, utr } = req.body;
 
-    const { order_id, status } = req.body;
+  console.log("Webhook Received:", req.body);
 
-    if (status === "PAID") {
-      await db.ref("orders/" + order_id).update({ status: "PAID" });
-      console.log("Updated via Webhook:", order_id);
-    }
+  if (!order_id) return res.send("Invalid Webhook");
 
-    res.send("OK");
+  if (status === "PAID" || status === "SUCCESS") {
+    await db.ref("orders/" + order_id).update({
+      status: "PAID",
+      utr: utr || null
+    });
 
-  } catch (err) {
-    console.log("Webhook Error:", err.message);
-    res.status(500).send("ERR");
+    // Auto Coin Add (optional)
+    await db.ref("users/" + order_id + "/coins")
+      .transaction((c) => (c || 0) + 10);
   }
+
+  res.send("Webhook OK");
 });
 
-// ---------------------------------------------
-// START SERVER
-// ---------------------------------------------
+// -------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("Server Running on PORT", PORT);
-});
+app.listen(PORT, () => console.log(`Server Running on ${PORT}`));
