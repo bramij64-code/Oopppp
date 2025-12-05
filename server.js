@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json());
 
 // -------------------------------------
-// Firebase Admin SDK (Render-friendly)
+// Firebase Admin Initialization
 // -------------------------------------
 admin.initializeApp({
   credential: admin.credential.cert({
@@ -20,29 +20,22 @@ admin.initializeApp({
 const db = admin.database();
 
 // -------------------------------------
-// Auto Order ID Generator
-// -------------------------------------
 function generateOrderID() {
-  const random = Math.floor(Math.random() * 9000) + 1000; // 4 digit random
-  return "ORD" + Date.now() + random;
+  return "ORD" + Date.now();
 }
 
 // -------------------------------------
-// Root Route
+// ROOT
 // -------------------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI Payment Gateway + Firebase ✔ Running Successfully 🔥");
+  res.send("ZapUPI Server Running 🔥");
 });
 
 // -------------------------------------
-// CREATE ORDER (ZapUPI)
+// CREATE ORDER
 // -------------------------------------
 app.post("/create-order", async (req, res) => {
-  let amount = req.body.amount || 1;
-
-  amount = parseInt(amount); // Fixes 1.04 / 1.07 issue
-
-  // Auto Order ID
+  let amount = parseInt(req.body.amount || 1);
   const orderId = generateOrderID();
 
   try {
@@ -52,38 +45,32 @@ app.post("/create-order", async (req, res) => {
         token_key: process.env.ZAP_TOKEN_KEY,
         secret_key: process.env.ZAP_SECRET_KEY,
         amount: amount,
-        order_id: orderId
+        order_id: orderId,
+        success_url: `${process.env.BASE_URL}/success/${orderId}`,
+        fail_url: `${process.env.BASE_URL}/fail/${orderId}`
       }),
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
 
     const zapData = zap.data;
 
-    const payment_url = zapData.payment_url;
-    const utr_check = zapData.utr_check;
-
-    if (!payment_url || !utr_check) {
-      return res.json({
-        success: false,
-        error: "ZapUPI error: payment_url or utr_check missing"
-      });
+    if (!zapData.payment_url) {
+      return res.json({ success: false, error: "ZapUPI didn't return payment_url" });
     }
 
-    // Save Order to Firebase
+    // Save Order
     await db.ref("orders/" + orderId).set({
       orderId,
       amount,
       status: "PENDING",
-      payment_url,
-      utr_check
+      payment_url: zapData.payment_url,
+      utr_check: zapData.utr_check
     });
 
     res.json({
       success: true,
       orderId,
-      payment_page: `${process.env.BASE_URL}/payment/${orderId}`,
-      payment_url,
-      utr_check
+      payment_page: `${process.env.BASE_URL}/payment/${orderId}`
     });
 
   } catch (error) {
@@ -92,13 +79,13 @@ app.post("/create-order", async (req, res) => {
 });
 
 // -------------------------------------
-// PAYMENT PAGE (Like SkillClash)
+// PAYMENT PAGE
 // -------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
   const snap = await db.ref("orders/" + id).once("value");
 
-  if (!snap.exists()) return res.send("Invalid Order ID ❌");
+  if (!snap.exists()) return res.send("Invalid Order ❌");
 
   const { amount, payment_url } = snap.val();
 
@@ -109,20 +96,11 @@ app.get("/payment/:id", async (req, res) => {
       <h2>Add Money ₹${amount}</h2>
       <p>Order ID: ${id}</p>
 
-      <br>
-
       <a href="${payment_url}">
-        <button style="
-          padding: 12px 22px;
-          background: #00c853;
-          color: white;
-          border: none;
-          border-radius: 10px;
-          font-size: 18px;
-        ">Pay Using QR</button>
+        <button style="padding: 12px 22px; background: #00c853; color: white; border: none; border-radius: 10px; font-size: 18px;">
+          Pay Now
+        </button>
       </a>
-
-      <br><br>
 
       <h3 id="msg">Waiting for payment...</h3>
 
@@ -132,27 +110,35 @@ app.get("/payment/:id", async (req, res) => {
           let data = await res.json();
 
           if (data.status === "PAID") {
-            document.getElementById("msg").innerHTML =
-             "Payment Success! ₹${amount} Added 🎉";
+            location.href = "/success/${id}";
           }
         }, 2000);
       </script>
 
   </body>
-  </html>
-  `;
+  </html>`;
 
   res.send(html);
 });
 
 // -------------------------------------
-// AUTO CHECK PAYMENT STATUS
+// SUCCESS PAGE
+// -------------------------------------
+app.get("/success/:id", (req, res) => {
+  res.send(`
+    <h1 style="color: green;">Payment Successful 🎉</h1>
+    <p>Your money has been added successfully.</p>
+  `);
+});
+
+// -------------------------------------
+// CHECK STATUS
 // -------------------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
   const snap = await db.ref("orders/" + id).once("value");
 
-  if (!snap.exists()) return res.json({ error: "Invalid order" });
+  if (!snap.exists()) return res.json({ status: "INVALID" });
 
   const order = snap.val();
 
@@ -171,7 +157,5 @@ app.get("/check-status/:id", async (req, res) => {
 });
 
 // -------------------------------------
-// START SERVER
-// -------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server Running at Port ${PORT} ✔`));
+app.listen(PORT, () => console.log(`Server Running on ${PORT}`));
