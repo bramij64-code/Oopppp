@@ -20,15 +20,17 @@ admin.initializeApp({
 const db = admin.database();
 
 // -------------------------------------
+// ORDER ID GENERATOR
+// -------------------------------------
 function generateOrderID() {
-  return "ORD" + Date.now();
+  return "ORD" + Date.now() + Math.floor(Math.random() * 10000);
 }
 
 // -------------------------------------
 // ROOT
 // -------------------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI Server Running 🔥");
+  res.send("ZapUPI Payment Server Live ✔");
 });
 
 // -------------------------------------
@@ -55,10 +57,12 @@ app.post("/create-order", async (req, res) => {
     const zapData = zap.data;
 
     if (!zapData.payment_url) {
-      return res.json({ success: false, error: "ZapUPI didn't return payment_url" });
+      return res.json({
+        success: false,
+        error: "ZapUPI didn't return payment_url"
+      });
     }
 
-    // Save Order
     await db.ref("orders/" + orderId).set({
       orderId,
       amount,
@@ -79,7 +83,7 @@ app.post("/create-order", async (req, res) => {
 });
 
 // -------------------------------------
-// PAYMENT PAGE
+// PAYMENT PAGE (SkillClash Style)
 // -------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
@@ -132,7 +136,17 @@ app.get("/success/:id", (req, res) => {
 });
 
 // -------------------------------------
-// CHECK STATUS
+// FAIL PAGE
+// -------------------------------------
+app.get("/fail/:id", (req, res) => {
+  res.send(`
+    <h1 style="color: red;">Payment Failed ❌</h1>
+    <p>Please try again.</p>
+  `);
+});
+
+// -------------------------------------
+// CHECK STATUS (UTR CHECK API)
 // -------------------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
@@ -154,6 +168,30 @@ app.get("/check-status/:id", async (req, res) => {
   } catch (e) {
     res.json({ status: order.status });
   }
+});
+
+// -------------------------------------
+// ZAPUPI WEBHOOK (AUTO VERIFY)
+// -------------------------------------
+app.post("/zapupi-webhook", async (req, res) => {
+  const { order_id, status, utr } = req.body;
+
+  console.log("Webhook Received:", req.body);
+
+  if (!order_id) return res.send("Invalid Webhook");
+
+  if (status === "PAID" || status === "SUCCESS") {
+    await db.ref("orders/" + order_id).update({
+      status: "PAID",
+      utr: utr || null
+    });
+
+    // Auto Coin Add (optional)
+    await db.ref("users/" + order_id + "/coins")
+      .transaction((c) => (c || 0) + 10);
+  }
+
+  res.send("Webhook OK");
 });
 
 // -------------------------------------
