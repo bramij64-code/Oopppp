@@ -20,22 +20,30 @@ admin.initializeApp({
 const db = admin.database();
 
 // -------------------------------------
-// Root
+// Auto Order ID Generator
+// -------------------------------------
+function generateOrderID() {
+  const random = Math.floor(Math.random() * 9000) + 1000; // 4 digit random
+  return "ORD" + Date.now() + random;
+}
+
+// -------------------------------------
+// Root Route
 // -------------------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI Payment Gateway with Firebase ✔ Running Successfully 🔥");
+  res.send("ZapUPI Payment Gateway + Firebase ✔ Running Successfully 🔥");
 });
 
 // -------------------------------------
-// Create Order (ZapUPI)
+// CREATE ORDER (ZapUPI)
 // -------------------------------------
 app.post("/create-order", async (req, res) => {
   let amount = req.body.amount || 1;
 
-  // 1.04, 1.07 issue fix
-  amount = parseInt(amount);
+  amount = parseInt(amount); // Fixes 1.04 / 1.07 issue
 
-  const orderId = "ORD" + Date.now();
+  // Auto Order ID
+  const orderId = generateOrderID();
 
   try {
     const zap = await axios.post(
@@ -51,11 +59,9 @@ app.post("/create-order", async (req, res) => {
 
     const zapData = zap.data;
 
-    // Extract Correct Fields
     const payment_url = zapData.payment_url;
     const utr_check = zapData.utr_check;
 
-    // Validate response
     if (!payment_url || !utr_check) {
       return res.json({
         success: false,
@@ -63,7 +69,7 @@ app.post("/create-order", async (req, res) => {
       });
     }
 
-    // Save to Firebase
+    // Save Order to Firebase
     await db.ref("orders/" + orderId).set({
       orderId,
       amount,
@@ -86,7 +92,7 @@ app.post("/create-order", async (req, res) => {
 });
 
 // -------------------------------------
-// Payment Page (SkillClash UI)
+// PAYMENT PAGE (Like SkillClash)
 // -------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
@@ -140,7 +146,7 @@ app.get("/payment/:id", async (req, res) => {
 });
 
 // -------------------------------------
-// Auto Check Payment Status
+// AUTO CHECK PAYMENT STATUS
 // -------------------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
@@ -165,7 +171,7 @@ app.get("/check-status/:id", async (req, res) => {
 });
 
 // -------------------------------------
-// Start Server
+// START SERVER
 // -------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server Running at Port ${PORT} ✔`));
