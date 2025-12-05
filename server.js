@@ -8,10 +8,10 @@ const cors = require("cors");
 
 const app = express();
 
-// Enable CORS (Netlify → Render Fetch Fix)
+// Enable CORS (Netlify → Render fix)
 app.use(cors());
 
-// Parse JSON body
+// Parse JSON
 app.use(express.json());
 
 // ---------------------------------------------
@@ -39,11 +39,11 @@ function generateOrderID() {
 // ROOT ROUTE
 // ---------------------------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI + Firebase + Webhook Server Running Successfully 🚀");
+  res.send("ZapUPI + Firebase Server Running Successfully 😎🚀");
 });
 
 // ---------------------------------------------
-// 💰 CREATE ORDER (WORKING & FIXED)
+// 💰 CREATE ORDER (FIXED ZAPUPI API + NO 403)
 // ---------------------------------------------
 app.post("/create-order", async (req, res) => {
   try {
@@ -56,9 +56,9 @@ app.post("/create-order", async (req, res) => {
       remark: "Recharge"
     });
 
-    // ✔ ZapUPI correct headers (403 FIXED)
+    // ✔ CORRECT ZapUPI API URL (NO 403)
     const zap = await axios.post(
-      "https://zapupi.com/api/deposit/create",
+      "https://api.zapupi.com/deposit/create",
       params,
       {
         headers: {
@@ -69,16 +69,13 @@ app.post("/create-order", async (req, res) => {
       }
     );
 
-    console.log("ZapUPI Order Response:", zap.data);
+    console.log("ZapUPI Response:", zap.data);
 
     if (!zap.data.payment_url) {
-      return res.json({
-        success: false,
-        error: "ZapUPI did not return payment_url"
-      });
+      return res.json({ success: false, error: "ZapUPI did not send payment_url" });
     }
 
-    // SAVE ORDER IN FIREBASE
+    // Save order in Firebase
     await db.ref("orders/" + orderId).set({
       orderId,
       amount,
@@ -101,20 +98,19 @@ app.post("/create-order", async (req, res) => {
 });
 
 // ---------------------------------------------
-// PAYMENT PAGE (UI + Auto Status Checker)
+// PAYMENT PAGE (Auto Check)
 // ---------------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const id = req.params.id;
 
   const snap = await db.ref("orders/" + id).once("value");
-
   if (!snap.exists()) return res.send("Invalid Order ❌");
 
   const { amount, payment_url } = snap.val();
 
   const html = `
   <html>
-  <body style="font-family:Arial;text-align:center;padding-top:40px;">
+  <body style="font-family:Arial;text-align:center;margin-top:40px;">
   
   <h2>Add Money ₹${amount}</h2>
   <p>Order ID: ${id}</p>
@@ -125,7 +121,7 @@ app.get("/payment/:id", async (req, res) => {
     </button>
   </a>
 
-  <h3 id="msg">Waiting for payment...</h3>
+  <h3>Waiting for Payment...</h3>
 
   <script>
     setInterval(async () => {
@@ -155,7 +151,7 @@ app.get("/success/:id", (req, res) => {
 });
 
 // ---------------------------------------------
-// CHECK STATUS (Auto Verify via utr_check URL)
+// CHECK STATUS (UTR Auto Verify)
 // ---------------------------------------------
 app.get("/check-status/:id", async (req, res) => {
   const id = req.params.id;
@@ -180,23 +176,23 @@ app.get("/check-status/:id", async (req, res) => {
 });
 
 // ---------------------------------------------
-// 🔔 WEBHOOK (Optional but Recommended)
+// ZAPUPI WEBHOOK (OPTIONAL)
 // ---------------------------------------------
 app.post("/zapupi-webhook", async (req, res) => {
   try {
-    console.log("Webhook Received:", req.body);
+    console.log("Webhook:", req.body);
 
     const { order_id, status } = req.body;
 
     if (status === "PAID") {
       await db.ref("orders/" + order_id).update({ status: "PAID" });
-      console.log("Order Updated to PAID:", order_id);
+      console.log("Updated via Webhook:", order_id);
     }
 
     res.send("OK");
 
   } catch (err) {
-    console.log("Webhook ERROR:", err.message);
+    console.log("Webhook Error:", err.message);
     res.status(500).send("ERR");
   }
 });
