@@ -55,7 +55,7 @@ app.post("/create-order", async (req, res) => {
 
     // ✔ CORRECT ZapUPI API URL (NO ERROR)
     const zap = await axios.post(
-      "https://api.zapupi.com/deposit/create",
+      "https://api.zapupi.com/api/create-order",
       params,
       {
         headers: {
