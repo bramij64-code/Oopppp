@@ -1,20 +1,19 @@
-// ---------------------------------------------
+// -------------------------------------------------------
 // IMPORTS
-// ---------------------------------------------
+// -------------------------------------------------------
 const express = require("express");
 const axios = require("axios");
-const qs = require("qs");
 const admin = require("firebase-admin");
 const cors = require("cors");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-// ---------------------------------------------
-// FIREBASE INIT
-// ---------------------------------------------
+
+// -------------------------------------------------------
+// FIREBASE INITIALIZATION
+// -------------------------------------------------------
 admin.initializeApp({
   credential: admin.credential.cert({
     project_id: process.env.FIREBASE_PROJECT_ID,
@@ -26,120 +25,137 @@ admin.initializeApp({
 
 const db = admin.database();
 
-// ---------------------------------------------
-// UTILS
-// ---------------------------------------------
+
+// -------------------------------------------------------
+// GENERATE ORDER ID
+// -------------------------------------------------------
 function generateOrderID() {
   return "ORD" + Date.now() + Math.floor(Math.random() * 1000);
 }
 
-// ---------------------------------------------
-// ROOT
-// ---------------------------------------------
+
+// -------------------------------------------------------
+// ROOT CHECK
+// -------------------------------------------------------
 app.get("/", (req, res) => {
-  res.send("ZapUPI Server Live ✔");
+  res.send("ZapUPI Server Working ✔");
 });
 
-// ---------------------------------------------
-// CREATE ORDER (100% FINAL WORKING)
-// ---------------------------------------------
+
+// -------------------------------------------------------
+// CREATE ORDER  (Correct as per ZapUPI Support)
+// -------------------------------------------------------
 app.post("/create-order", async (req, res) => {
   try {
     const amount = parseInt(req.body.amount || 1);
     const orderId = generateOrderID();
 
-    // ZapUPI Required Body
-    const data = qs.stringify({
+    const params = new URLSearchParams({
+      token_key: process.env.ZAP_TOKEN_KEY,
+      secret_key: process.env.ZAP_SECRET_KEY,
       amount: amount,
       order_id: orderId,
-      remark: "Recharge",
-      secret: process.env.ZAP_SECRET_KEY   // SECRET REQUIRED!!
+      success_url: `${process.env.BASE_URL}/success/${orderId}`,
+      fail_url: `${process.env.BASE_URL}/fail/${orderId}`
     });
 
+    // ✔ OFFICIAL CREATE ORDER API
     const zap = await axios.post(
-      "https://api.zapupi.com/api/create-order",   // ✔ correct URL
-      data,
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded"
-        }
-      }
+      "https://api.zapupi.com/api/create-order",
+      params,
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
 
-    // Save in Firebase
+    if (!zap.data.payment_url) {
+      return res.json({ success: false, error: "ZapUPI did not return payment_url" });
+    }
+
     await db.ref("orders/" + orderId).set({
-      amount,
       orderId,
-      status: "PENDING",
+      amount,
       payment_url: zap.data.payment_url,
-      utr_check: zap.data.utr_check
+      status: "PENDING"
     });
 
     res.json({
       success: true,
       orderId,
-      payment_page: `${process.env.BASE_URL}/payment/${orderId}`,
-      payment_url: zap.data.payment_url
+      payment_page: `${process.env.BASE_URL}/payment/${orderId}`
     });
 
   } catch (err) {
-    console.log("Create Error:", err.response?.data || err.message);
-    res.json({
-      success: false,
-      error: err.response?.data || err.message
-    });
+    console.log("Order Error:", err.message);
+    res.json({ success: false, error: err.message });
   }
 });
 
-// ---------------------------------------------
+
+// -------------------------------------------------------
 // PAYMENT PAGE
-// ---------------------------------------------
+// -------------------------------------------------------
 app.get("/payment/:id", async (req, res) => {
   const snap = await db.ref("orders/" + req.params.id).once("value");
 
   if (!snap.exists()) return res.send("Invalid Order ❌");
 
-  const { amount, payment_url } = snap.val();
+  const order = snap.val();
 
   res.send(`
-    <h2>Add Money ₹${amount}</h2>
-    <p>Order ID: ${req.params.id}</p>
-    <a href="${payment_url}">
-      <button style="padding:10px 20px;background:green;color:white;border:none;border-radius:8px;">
+    <h2>Add Money ₹${order.amount}</h2>
+    <a href="${order.payment_url}">
+      <button style="padding:10px 20px;background:green;color:white;font-size:18px;border:none;border-radius:10px;">
         Pay Now
       </button>
     </a>
-
-    <h3>Waiting for payment...</h3>
   `);
 });
 
-// ---------------------------------------------
-// CHECK STATUS (UTR Verify)
-// ---------------------------------------------
+
+// -------------------------------------------------------
+// SUCCESS PAGE
+// -------------------------------------------------------
+app.get("/success/:id", (req, res) => {
+  res.send("<h1 style='color:green;'>Payment Successful 🎉</h1>");
+});
+
+
+// -------------------------------------------------------
+// FAIL PAGE
+// -------------------------------------------------------
+app.get("/fail/:id", (req, res) => {
+  res.send("<h1 style='color:red;'>Payment Failed ❌</h1>");
+});
+
+
+// -------------------------------------------------------
+// ORDER STATUS CHECK (Correct as per ZapUPI Support)
+// -------------------------------------------------------
 app.get("/check-status/:id", async (req, res) => {
-  const snap = await db.ref("orders/" + req.params.id).once("value");
-
-  if (!snap.exists()) return res.json({ status: "INVALID" });
-
-  const order = snap.val();
-
   try {
-    const zap = await axios.get(order.utr_check);
+    const order = await db.ref("orders/" + req.params.id).once("value");
+    if (!order.exists()) return res.json({ status: "INVALID" });
+
+    const orderId = req.params.id;
+
+    // ✔ OFFICIAL STATUS API
+    const api = `https://api.zapupi.com/api/order-status?order_id=${orderId}`;
+
+    const zap = await axios.get(api);
 
     if (zap.data.status === "PAID") {
-      await db.ref("orders/" + req.params.id).update({ status: "PAID" });
+      await db.ref("orders/" + orderId).update({ status: "PAID" });
     }
 
     res.json({ status: zap.data.status });
 
-  } catch {
-    res.json({ status: order.status });
+  } catch (err) {
+    res.json({ status: "ERROR" });
   }
 });
 
-// ---------------------------------------------
-// SERVER START
-// ---------------------------------------------
+
+// -------------------------------------------------------
+// START SERVER
+// -------------------------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server Running on PORT", PORT));
+app.listen(PORT, () => console.log("Server Running on", PORT));
